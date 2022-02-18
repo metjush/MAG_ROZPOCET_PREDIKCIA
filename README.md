@@ -2,6 +2,8 @@
 
 Tento model slúži na odhad vývoja bežných príjmov rozpočtu HMBA v rámci jedného rozpočtového roka. Vychádza z historických denných/mesačných trendov vývoja bežných príjmov. Obsahuje aj interval spoľahlivosti. Slúži pre rýchlu diagnostiku vývoja príjmov. Aktualizovať je možné ho denne.  
 
+Vopred sa ospravedlňujem za nekonzistentné miešanie angličtiny a slovenčiny v kóde, komentároch aj názvoch premenných. 
+
 ## Netechnický opis spôsobu výpočtu predikcie
 Model počíta tri rôzne predikcie pre bežné príjmy: 
 - Predikciu podielových daní (DPFO) na mesačnej báze
@@ -38,4 +40,46 @@ Po stiahnutí dát z databázy je potrebné ich spracovať do štruktúry denné
 
 Metóda `finalize()` agregované dáta spojí s pripravenou dennou kostrou a vráti denné agregované dáta v dlhom formáte.
 
-###
+### Výpočet trendov 
+Metódy pre výpočet denných trendov sú implementované v súbore `build_trends.py`. Postup výpočtu je nasledovný:
+1. Metóda `load_history()` načíta dáta z predošlých krokov podľa definovaných `levels`
+2. Metóda `share_calculation()` vypočíta denné percentuálne trendy pre jednotlivé úrovne a roky 
+3. Metóda `train_test_split()` rozdelí historické dáta podľa rokov na trénovaciu sadu a testovaciu sadu
+4. Metóda `optimize_train()` z trénovacej sady vypočíta optimálne váhy jednotlivých rokov, ktoré najlepšie predikujú vývoj v testovacích rokoch (viď nižšie)
+5. Metóda `build_trends()` vypočíta optimálne denné trendy pre jednotlivé úrovne, ktoré budú používané pre prognózu vývoja v aktuálnom roku 
+
+Výpočet optimálnych váh pre jednotlivé roky je implementovaný v metódach `compute_prediction()`, `compute_error()`, `trainer()` a zabalený v metóde `optimize_train()`. 
+
+Vstupom sú percentuálne denné váhy jednotlivých rokov a úrovní (ekonomických kategórií) - 3D tenzor `train` v tvare `(roky, dni, kategorie)`. Výpočet vážených denných trendov je súčinom tenzoru `train` a vektoru `coefs`, ktorý obsahuje váhy od `0.0` do `1.0` pre jednotlivé roky (tvar `(1, roky)`). Výsledkom je 2D matica denných trendov pre jednotlivé ekonomické kategórie (tvar `(dni, kategorie)`).
+
+Optimálne váhy sú vypočítané lineárnym programovaním, metódou `SLSQP`, ktorá minimalizuje odchýlku oproti testovacej sade, počítanú ako `root mean squared error (RMSE)` v metóde `compute_error()`. Reziduálne hodnoty (rozdiel medzi skutočnými dennými trendami v testovacej sade a odhadnutými trendami z trénovacej sady) sú použité pre výpočet intervalu spoľahlivosti prognózy. 
+
+Výsledkom je databáza denných trendov a chýb prognózy pre jednotlivé ekonomické kategórie. V našej implementácii počítame trendy pre miestne dane na úrovni `EKRK` a pre nedaňové príjmy a bežné transfery na úrovni `EK3`. Podielové dane (DPFO) sú počítané rovnako ako je opísané vyššie, ale na mesačnej úrovni. 
+
+Použité trendy sú na githube uložené v `pickle` formáte:
+- DPFO: `dpfo_trends.pkl`
+- Miestne dane: `danove_trends.pkl`
+- Nedaňové príjmy a bežné transfery: `nedanove_trends.pkl`
+
+### Výpočet prognózy v aktuálnom roku
+Súbor `predict.py` je záverečným súborom, ktorý implementuje výpočet prognózy pre aktuálny rok. Využíva mnohé z metód, opísaných vyššie pre spracovanie dát aktuálneho roku. Celý proces je zhrnutý v metóde `master_predict()`:
+1. Metódou `load_current_sql()` stiahne aktuálne plnenie/čerpanie rozpočtu k dnešnému dňu z databázy IS Noris
+2. Metódou `group_current()` spracuje, vyčistí a agreguje dáta do trochu kategórii (DPFO, miestne dane, nedaňové príjmy)
+3. Načíta trendy z `pickle` súborov metódou `load_trend()`
+4. Zohľadní váhy pre vybrané miestne dane, ktoré sa delia medzi mesto a mestské časti (daň z nehnuteľnosti a poplatok za odpad) v premennej `w`
+5. Vypočíta prognózu na základe aktuálneho plnenia a optimálnych trendov metódami `dpfo_forecast()` a `eoy_forecast()`
+6. Stiahne aktuálne platný rozpočet metódou `prepare_budget()`
+7. Spracuje aktuálne rozpočty pre porovnanie s prognózou metódami `budget_dpfo()` a `budget_daily()`
+8. Uloží prognózy a aktuálne rozpočty do vlastnej PostgreSQL databázy metódou `write_forecasts()`
+
+PostgreSQL databáza je prístupná aj mimo VPN HMBA a používa sa pre vytvorenie interaktívneho dashboardu cez Deepnote (viď nižšie). 
+Zatiaľ je potrebné ho spúšťať ručne. 
+
+### Vybudovanie interaktívneho dashboardu v Deepnote
+Cez [Deepnote](https://deepnote.com/) vytvárame interaktívny dashboard, kde je možné vidieť aktuálnu prognózu v grafoch, v porovnaní s aktuálnym rozpočtom. 
+
+Notebook `PSQL_CONNECTOR` cez vstavanú integráciu na Postgres databázu stiahne aktuálnu prognózu a rozpočty pre jednotlivé kategórie príjmov. Kód notebooku je dostupný [tu](https://deepnote.com/project/PSQLCONNECTOR-Bw1iOLjlSAu733MDnPJSTA/%2FDB_connector.ipynb). Následne do "shared dataset" v Deepnote uloží stiahnuté dáta ako `pickle`. Tento notebook je automaticky aktualizovaný každý deň. 
+
+Následne sa každý deň aktualizuje aj [dashboard](https://deepnote.com/@matus-luptak/budgetprediction-NRkVPStbR4GFuA0ybYSf6g), kde sú vizualizované predikcie pre DPFO, miestne dane aj nedaňové príjmy v grafoch. 
+
+
