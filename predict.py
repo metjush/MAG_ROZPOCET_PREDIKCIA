@@ -1,7 +1,5 @@
-import sys 
 from datetime import date
 import time
-from nbformat import write 
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine
