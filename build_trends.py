@@ -4,12 +4,17 @@ import pandas as pd
 from scipy import optimize
 from defaults import *
 
-def load_history(filename, levels):
+def load_history(filename, levels, filters):
     """
     Metoda, ktora nacita v pkl formate zgroupovane denne data v dlhom formate
     Zakladne vycistenie 
     """
     history = pd.read_pickle(filename)
+    # filter items
+    if len(levels) == 1:
+        history = history.loc[history[levels[0]].isin(filters)]
+    else:
+        history = history
     # pivot
     hpivot = history.pivot(index=['ROK','DATUM_UCTOVANIA','MESIAC','DEN'], columns=levels, values='CUMSUM').reset_index()
     # drop February 29
@@ -162,8 +167,11 @@ if __name__ == "__main__":
     1. name of historical data file
     2. flag -l
     3. list of levels
+    4. flag -f
+    5. list of filtered items to use
 
     if -l not passed, default levels are used
+    if -f not passed, all items are used
     """ 
 
     try:
@@ -173,15 +181,29 @@ if __name__ == "__main__":
 
     history = arguments[0]
     if '-l' in arguments:
-        flag_position = arguments.index('-l') + 1
-        try:
-            levels = arguments[flag_position:]
-        except:
-            levels = ['EK3']
+        level_position = arguments.index('-l') + 1
+        if '-f' in arguments:
+            filter_position = arguments.index('-f') + 1
+            try:
+                levels = arguments[level_position:(filter_position-1)]
+                filters = arguments[filter_position:]
+            except:
+                levels = ['EK3']
+                filters = []
+        else:
+            try:
+                levels = arguments[level_position:]
+            except:
+                levels = []
+                filters = []
     else:
         levels = ['EK3']
+        filters = []
 
-    h = load_history(history, levels)
+    print(levels)
+    print(filters)
+
+    h = load_history(history, levels, filters)
     shares = share_calculation(h)
     train, test = train_test_split(shares)
     beta, residuals = optimize_train(train, test)

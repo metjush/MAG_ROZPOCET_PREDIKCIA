@@ -18,6 +18,8 @@ def grouper(ucto_data, levels=['PROG','EK1']):
     Vrati pandas dataframe so sumami aj kumulativnymi sumami 
     """
     columns = ['DATUM_UCTOVANIA','ROK','MESIAC','DEN','MDD','PV'] + levels
+    # vytvor nove EK stlpce ak nie su 
+    ucto_data['EK2'] = ucto_data.EKRK.str[:2]
     g = ucto_data.groupby(columns)['SUMA'].sum()
     g = g.reset_index()
     # nechaj len skutocnost, nie rozpocet (skutocne vydavky su na D, skutocne prijmy na M)

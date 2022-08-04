@@ -113,12 +113,21 @@ def eoy_forecast(current, trends, weights=None):
     l = len(current) # dlzka skutocnych dat
     daily_forecast[:l] = current.values
     errors[:l] = 0.
+    daily_forecast.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
+    errors.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
     daily_forecast = daily_forecast.fillna(method='pad',axis=0)
     errors = errors.fillna(method='pad',axis=0)
 
     # vypocet rozptylu
     low = daily_forecast - errors
     high = daily_forecast + errors
+
+    # nech chyby nie su nizsie ako posledna skutocnost
+    last_current = current.values[l-1]
+    low[l:] = low[l:].apply(lambda x: np.maximum(x, last_current), axis=1) # nahrad nizsi error ako posledna skutocnost poslednou skutocnostou
+    high[l:] = high[l:].apply(lambda x: np.maximum(x, last_current), axis=1) # nahrad nizsi error ako posledna skutocnost poslednou skutocnostou
+
+
 
     # spolocny frame
     prediction = pd.concat({'Forecast':daily_forecast, 'Low':low, 'High':high}, names=['Prediction']).droplevel([1],axis=0)
@@ -158,6 +167,11 @@ def dpfo_forecast(current, trends):
     monthly_forecast[:l] = current.values.reshape(shp)
     low_forecast[:l] = current.values.reshape(shp)
     high_forecast[:l] = current.values.reshape(shp)
+
+    # precisti chyby, aby neboli nizsie ako skutocnost 
+    last_current = current.values[l-1]
+    low_forecast[l:] = np.maximum(low_forecast[l:], last_current)
+    high_forecast[l:] = np.maximum(high_forecast[l:], last_current)
 
     # spolocny frame
     prediction = pd.concat({'Forecast':monthly_forecast, 'Low':low_forecast, 'High':high_forecast}, names=['Prediction']).droplevel([1],axis=0)
@@ -280,7 +294,8 @@ def master_predict():
 
     # forecasts
     predictions = [None,None,None]
-    if date.today().day < 25:
+    todayday = date.today().day
+    if todayday < 24:
         dpfo_to_predict = dpfo.head(len(dpfo)-1) # if it is too early, dont predict DPFO for the current month
     else:
         dpfo_to_predict = dpfo
@@ -304,3 +319,13 @@ def master_predict():
     except:
         raise('Error in writing forecast to database')
 
+
+if __name__ == "__main__":
+    """
+    Ked sa program spusti cez command line
+    bez argumentov
+    """
+
+    master_predict()
+    
+    
