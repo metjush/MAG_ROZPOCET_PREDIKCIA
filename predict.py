@@ -203,7 +203,7 @@ def budget_daily(budget, trends):
     """
     Metoda, ktora vypocita ocakavanie pre denne prijmy na zaklade aktualneho rozpoctu 
     """
-    level_ix = set(trends.columns).intersection(set(budget.index)) # intersection of levels 
+    level_ix = list(set(trends.columns).intersection(set(budget.index))) # intersection of levels 
     
     # filter trends and budget
     filtered_trend = trends[level_ix]

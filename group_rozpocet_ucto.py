@@ -23,7 +23,7 @@ def grouper(ucto_data, levels=['PROG','EK1']):
     g = ucto_data.groupby(columns)['SUMA'].sum()
     g = g.reset_index()
     # nechaj len skutocnost, nie rozpocet (skutocne vydavky su na D, skutocne prijmy na M)
-    filter = g.loc[((g.MDD == 'D') & (g.PV == 'V')) | ((g.MDD == 'M') & (g.PV == 'P'))]
+    filter = g.loc[((g.MDD == 'D') & (g.PV == 'V')) | ((g.MDD == 'M') & (g.PV == 'P'))].copy()
     filter.drop(['MDD'],axis=1,inplace=True)
     # kumulativne sumy 
     filter_columns = ['ROK','PV'] + levels
