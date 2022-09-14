@@ -315,6 +315,7 @@ def master_predict():
     engine = psql_connect()
     try:
         write_forecasts(engine, predictions, budgets)
+        print('SUCCESS: Forecast written to database')
         return True
     except:
         raise('Error in writing forecast to database')
