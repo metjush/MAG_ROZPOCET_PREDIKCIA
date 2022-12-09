@@ -25,7 +25,7 @@ def load_current_sql():
     """
     year = date.today().year
     month = date.today().month
-    
+
     c, cu = sql_connect()
     data = sql_ucto(cu, 1, month, year)
     c.close()
@@ -84,10 +84,20 @@ def eoy_forecast(current, trends, weights=None):
     vrati dennu prognozu a error prognozy
     Weights su specialne upravy prognozy (napr. pre DZN, ktore sa deli na polovicu)
     """
+    # aktualny datum pre kontrolu
+    _month = date.today().month
+    _day = date.today().day
     # najdi posledny datum v aktual datach
     creset = current.reset_index()
     max_m = creset.MESIAC.max()
     max_d = creset[creset.MESIAC == max_m].DEN.max()
+    # kontrola ci data nie su "popredu" z nejakeho dovodu
+    if max_m == _month and max_d > _day:
+        max_d = max(_day - 1, 1) # fix to day before today
+    if max_m > _month:
+        max_m = _month
+        max_d = max(_day - 1, 1)
+  
     current_day = creset[(creset.MESIAC == max_m) & (creset.DEN == max_d)]
     cd_values = current_day.values[0,4:].astype(np.float64)
     # vyber vhodny trend
@@ -110,8 +120,8 @@ def eoy_forecast(current, trends, weights=None):
     errors = daily_forecast * re_values
         
     # napln skutocnostou
-    l = len(current) # dlzka skutocnych dat
-    daily_forecast[:l] = current.values
+    l = len(creset[((creset.MESIAC < max_m) | ((creset.MESIAC == max_m) & (creset.DEN <= max_d)))]) # dlzka skutocnych dat
+    daily_forecast[:l] = current.values[:l]
     errors[:l] = 0.
     daily_forecast.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
     errors.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
