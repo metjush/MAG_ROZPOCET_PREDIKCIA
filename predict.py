@@ -26,6 +26,11 @@ def load_current_sql():
     year = date.today().year
     month = date.today().month
 
+    # if month is january or february, download previous year
+    if month < 3:
+        year = year - 1
+        month = 12
+
     c, cu = sql_connect()
     data = sql_ucto(cu, 1, month, year)
     c.close()
