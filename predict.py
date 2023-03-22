@@ -279,7 +279,7 @@ def write_forecasts(sql_engine, multi_forecasts, multi_budgets, order=['DPFO','d
     
     # write entry into PREDICTIONS table
     timestamp_df = pd.DataFrame({'PREDICTION_TIME':timestamp},index=[0])
-    timestamp_df.to_sql('PREDICTIONS',sql_engine, None, if_exists='replace', index=False)
+    timestamp_df.to_sql('last_prediction',sql_engine, None, if_exists='append', index=False)
     return None
 
 def master_predict():
