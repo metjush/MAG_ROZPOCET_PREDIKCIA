@@ -43,6 +43,23 @@ def sql_ucto(cursor, m_start, m_end, rok, top=None):
     return pd.DataFrame(data) 
 
 
+def sql_ucto_nofetch(cursor, m_start, m_end, rok, top=None):
+    """
+    Z Noris SQL databazy stiahni individualne uctovne zaznamy do rozpoctu
+    Teda ide o uctovne zaznamy, ktore su uctovane proti uctom v triede 8 
+    a da s z uctu vycitat rozpoctova klasifikacia
+
+    Metoda je postavena vzdy na urovni jedneho roku a mesacnej baze 
+
+    Top = prvych X vysledkov
+    Vrati len cursor, na fetchovanie podla potreby
+    """
+    q = sql_ucto_rozpocet(m_start, m_end, rok, top)
+    cursor.execute(q)
+    return cursor
+
+
+
 def clean_sql_ucto(ucto_data, redo=False):
     """
     Vycisti data, stiahnute metodou "sql_ucto"
@@ -57,7 +74,11 @@ def clean_sql_ucto(ucto_data, redo=False):
 
     # ucet sa rozdeli zlozky cez whitespace
     rozbite = clean_ucto.UCET.str.split(None, 3, True)
-    if rozbite.shape[1] < 4:
+    if rozbite.shape[1] < 3:
+        clean_ucto[['UCET_KOD','EKRK']] = rozbite
+        clean_ucto['PROGRAM'] = None
+        clean_ucto['OVERFLOW'] = None
+    elif rozbite.shape[1] < 4:
         clean_ucto[['UCET_KOD','EKRK','PROGRAM']] = rozbite
         clean_ucto['OVERFLOW'] = None
     else:

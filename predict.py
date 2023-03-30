@@ -10,6 +10,8 @@ from defaults import *
 from author import *
 from aktualne_cerpanie_export import batch_query as rozpocet
 
+from memory_profiler import profile
+
 def psql_connect():
     """
     Metoda, ktora sa napoji na postgres a vrati engine
@@ -18,6 +20,7 @@ def psql_connect():
     engine = create_engine(connection)
     return engine
 
+#@ profile
 def load_current_sql():
     """
     Z Noris SQL stiahne aktualny rok
@@ -32,11 +35,26 @@ def load_current_sql():
         month = 12
 
     c, cu = sql_connect()
-    data = sql_ucto(cu, 1, month, year)
+    # execute query, dont fetch
+    cu = sql_ucto_nofetch(cu, 1, month, year)
+    # iterate over results in blocks
+    clean = None
+    while True:
+        _data = cu.fetchmany(500)
+        if len(_data) == 0:
+            break
+        _df = pd.DataFrame(_data)
+        if clean is None:
+            clean = clean_sql_ucto(_df)
+        else:
+            clean = pd.concat([clean, clean_sql_ucto(_df)], ignore_index=True)
     c.close()
     
-    clean = clean_sql_ucto(data)
+    # release memory of raw data
+    del _df
+    del _data 
     return clean
+
 
 def group_current(clean_data):
     """
@@ -282,6 +300,8 @@ def write_forecasts(sql_engine, multi_forecasts, multi_budgets, order=['DPFO','d
     timestamp_df.to_sql('last_prediction',sql_engine, None, if_exists='append', index=False)
     return None
 
+@profile
+
 def master_predict():
     """
     Wrapper metoda ktora spusti cely forecast a ulozi data do databazy
@@ -292,7 +312,8 @@ def master_predict():
 
     # group data
     dpfo, dan, nedan = group_current(curr_data)
-
+    del curr_data # release memory
+    
     # get trends
     dpfo_trends = pd.read_pickle('dpfo_trends.pkl')
     dan_trends = load_trend(dan, 'danove_trends.pkl')
