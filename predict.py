@@ -10,8 +10,6 @@ from defaults import *
 from author import *
 from aktualne_cerpanie_export import batch_query as rozpocet
 
-from memory_profiler import profile
-
 def psql_connect():
     """
     Metoda, ktora sa napoji na postgres a vrati engine
@@ -20,7 +18,6 @@ def psql_connect():
     engine = create_engine(connection)
     return engine
 
-#@ profile
 def load_current_sql():
     """
     Z Noris SQL stiahne aktualny rok
@@ -299,8 +296,6 @@ def write_forecasts(sql_engine, multi_forecasts, multi_budgets, order=['DPFO','d
     timestamp_df = pd.DataFrame({'PREDICTION_TIME':timestamp},index=[0])
     timestamp_df.to_sql('last_prediction',sql_engine, None, if_exists='append', index=False)
     return None
-
-@profile
 
 def master_predict():
     """
