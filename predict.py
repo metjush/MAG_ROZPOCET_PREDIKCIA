@@ -18,10 +18,12 @@ def psql_connect():
     engine = create_engine(connection)
     return engine
 
-def load_current_sql():
+def load_current_sql(*levels):
     """
     Z Noris SQL stiahne aktualny rok
-    Vrati vycisteny pandas dataframe 
+    Vrati vycisteny pandas dataframe, ktory uz bude agregovany podla potreby
+    Levels = kazdy argument je list urovni, podla ktorych maju byt data zgrupene
+    Ak nie su levels zadane, vrati neagregovany cisty plny dataset
     """
     year = date.today().year
     month = date.today().month
@@ -34,26 +36,55 @@ def load_current_sql():
     c, cu = sql_connect()
     # execute query, dont fetch
     cu = sql_ucto_nofetch(cu, 1, month, year)
+
     # iterate over results in blocks
     clean = None
+    
+    # need at least one level if grouping 
+    n_levels = len(levels)
+    group = n_levels > 0
+    level_range = range(n_levels)
+
     while True:
-        _data = cu.fetchmany(500)
+        _data = cu.fetchmany(750)
         if len(_data) == 0:
             break
         _df = pd.DataFrame(_data)
-        if clean is None:
-            clean = clean_sql_ucto(_df)
-        else:
-            clean = pd.concat([clean, clean_sql_ucto(_df)], ignore_index=True)
+        _clean = clean_sql_ucto(_df)
+
+        # group by blocks
+        if group:
+            if clean is None:
+                clean = [ grouper(_clean, levels[x]) for x in level_range ]
+            else:
+                clean = [ pd.concat([clean[x], grouper(_clean, levels[x])],  ignore_index=True) for x in level_range ]
+        
+        # only clean data and concat
+        else: 
+            if clean is None:
+                clean = _clean
+            else:
+                clean = pd.concat([clean, _clean], ignore_index=True)
     c.close()
     
     # release memory of raw data
     del _df
     del _data 
+
+    # regroup grouped data
+    if group:
+        for x in level_range:
+            _filter_columns = ['ROK','PV'] + levels[x]
+            _columns = ['DATUM_UCTOVANIA','ROK','MESIAC','DEN','PV'] + levels[x]
+            _clean = clean[x].groupby(_columns)['SUMA'].sum().reset_index()
+            _clean['CUMSUM'] = _clean.groupby(_filter_columns)['SUMA'].cumsum()
+            clean[x] = _clean
+    del _clean
+
     return clean
 
 
-def group_current(clean_data):
+def group_current(grouped_ekrk, grouped_ek3):
     """
     Spracuje data z Noris do struktury, ktora moze byt pouzita pre predikciu
     
@@ -65,7 +96,7 @@ def group_current(clean_data):
     """
     
     # EKRK, vyber danove
-    grouped_ekrk = grouper(clean_data, ['EKRK'])
+    #grouped_ekrk = grouper(clean_data, ['EKRK'])
     years = pd.unique(grouped_ekrk.ROK)
     skelet = skeleton(years.min(), years.max())
     final_ekrk = finalize(grouped_ekrk, skelet, ['EKRK'])
@@ -73,7 +104,7 @@ def group_current(clean_data):
     dan_pivot = danove.pivot(index=['ROK','DATUM_UCTOVANIA','MESIAC','DEN'], columns='EKRK', values='CUMSUM')
 
     # EK3, vyber nedanove
-    grouped_ek3 = grouper(clean_data, ['EK3'])
+    #grouped_ek3 = grouper(clean_data, ['EK3'])
     years = pd.unique(grouped_ek3.ROK)
     skelet = skeleton(years.min(), years.max())
     final_ek3 = finalize(grouped_ek3, skelet, ['EK3'])
@@ -303,12 +334,11 @@ def master_predict():
     """
 
     # get current data
-    curr_data = load_current_sql()
+    grouped_ekrk, grouped_ek3 = load_current_sql(['EKRK'], ['EK3'])
 
     # group data
-    dpfo, dan, nedan = group_current(curr_data)
-    del curr_data # release memory
-    
+    dpfo, dan, nedan = group_current(grouped_ekrk, grouped_ek3)
+
     # get trends
     dpfo_trends = pd.read_pickle('dpfo_trends.pkl')
     dan_trends = load_trend(dan, 'danove_trends.pkl')
