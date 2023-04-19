@@ -3,6 +3,8 @@ import time
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine
+import pymssql as sql
+
 
 from rozpocet_ucto_sql import * 
 from group_rozpocet_ucto import *
@@ -33,7 +35,15 @@ def load_current_sql(*levels):
         year = year - 1
         month = 12
 
-    c, cu = sql_connect()
+    try:
+        c, cu = sql_connect()
+    except sql.InterfaceError:
+        print("A MSSQLDriverException has been caught.")
+        raise(sql.InterfaceError)
+    except sql.DatabaseError:
+        print("A MSSQLDatabaseException has been caught.")
+        raise(sql.DatabaseError)
+    
     # execute query, dont fetch
     cu = sql_ucto_nofetch(cu, 1, month, year)
 
