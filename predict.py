@@ -136,7 +136,8 @@ def load_trend(current, trend_file):
 
     current_levels = current.columns 
     trends = pd.read_pickle(trend_file)
-    filtered_trends = trends[current_levels]
+    level_intersection = list(set(current_levels).intersection(set(trends.columns)))
+    filtered_trends = trends[level_intersection]
     return filtered_trends
 
 def eoy_forecast(current, trends, weights=None):
@@ -145,11 +146,14 @@ def eoy_forecast(current, trends, weights=None):
     vrati dennu prognozu a error prognozy
     Weights su specialne upravy prognozy (napr. pre DZN, ktore sa deli na polovicu)
     """
+    # zaisti aby columns trendov a dat boli rovnake
+    filtered_current = current.loc[:,trends.columns]
+
     # aktualny datum pre kontrolu
     _month = date.today().month
     _day = date.today().day
     # najdi posledny datum v aktual datach
-    creset = current.reset_index()
+    creset = filtered_current.reset_index()
     max_m = creset.MESIAC.max()
     max_d = creset[creset.MESIAC == max_m].DEN.max()
     # kontrola ci data nie su "popredu" z nejakeho dovodu
@@ -174,7 +178,7 @@ def eoy_forecast(current, trends, weights=None):
     # prevazenie
     if weights is not None:
         for lvl in set(daily_forecast.columns).intersection(set(weights.keys())):
-            current[lvl] = current[lvl] * weights[lvl]
+            filtered_current[lvl] = filtered_current[lvl] * weights[lvl]
             daily_forecast[lvl] = daily_forecast[lvl] * weights[lvl]
     
     # chyba prognozy
@@ -182,7 +186,7 @@ def eoy_forecast(current, trends, weights=None):
         
     # napln skutocnostou
     l = len(creset[((creset.MESIAC < max_m) | ((creset.MESIAC == max_m) & (creset.DEN <= max_d)))]) # dlzka skutocnych dat
-    daily_forecast[:l] = current.values[:l]
+    daily_forecast[:l] = filtered_current.values[:l]
     errors[:l] = 0.
     daily_forecast.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
     errors.replace([np.inf, -np.inf], np.nan, inplace=True) # nahrad inf hodnoty nan
@@ -194,7 +198,7 @@ def eoy_forecast(current, trends, weights=None):
     high = daily_forecast + errors
 
     # nech chyby nie su nizsie ako posledna skutocnost
-    last_current = current.values[l-1]
+    last_current = filtered_current.values[l-1]
     low[l:] = low[l:].apply(lambda x: np.maximum(x, last_current), axis=1) # nahrad nizsi error ako posledna skutocnost poslednou skutocnostou
     high[l:] = high[l:].apply(lambda x: np.maximum(x, last_current), axis=1) # nahrad nizsi error ako posledna skutocnost poslednou skutocnostou
 
@@ -204,16 +208,26 @@ def eoy_forecast(current, trends, weights=None):
     prediction = pd.concat({'Forecast':daily_forecast, 'Low':low, 'High':high}, names=['Prediction']).droplevel([1],axis=0)
     return prediction
 
-def dpfo_forecast(current, trends):
+def dpfo_forecast(current, trends, DPPO=None):
     """
     Metoda, ktora vypocita EOY prognozu pre DPFO
     vrati EOY prognozu a error prognozy
+
+    DPPO ako priestor na upravu kompenzovanej DPPO
+    Ocakava 12 dlhy array floatov po mesiacoch
     """
+    # ak DPPO nie je None
+    dppo_sum = 0
+    dppo_cumsum = np.zeros(12)
+    if DPPO is not None:
+        dppo_sum = DPPO.sum()
+        dppo_cumsum = DPPO.cumsum()
+
     # najdi posledny datum v aktual datach
     creset = current.reset_index()
     max_m = creset.MESIAC.max()
     current_day = creset[(creset.MESIAC == max_m)]
-    cd_values = current_day.values[0,-1].astype(np.float64)
+    cd_values = current_day.values[0,-1].astype(np.float64) - dppo_sum # odpocitaj DPPO 
     # vyber vhodny trend
     treset = trends.reset_index()
     relevant_trend = treset[(treset.MESIAC == max_m) & (treset.Prediction == 'Forecast')]
@@ -241,8 +255,14 @@ def dpfo_forecast(current, trends):
 
     # precisti chyby, aby neboli nizsie ako skutocnost 
     last_current = current.values[l-1]
-    low_forecast[l:] = np.maximum(low_forecast[l:], last_current)
-    high_forecast[l:] = np.maximum(high_forecast[l:], last_current)
+    low_forecast[l:] = np.maximum(low_forecast[l:], last_current-dppo_sum)
+    high_forecast[l:] = np.maximum(high_forecast[l:], last_current-dppo_sum)
+
+    # dopocitaj DPPO naspat
+    _reshaped_dppo = dppo_cumsum.reshape((12,1))
+    monthly_forecast[l:] += _reshaped_dppo[l:]
+    low_forecast[l:] += _reshaped_dppo[l:]
+    high_forecast[l:] += _reshaped_dppo[l:]
 
     # spolocny frame
     prediction = pd.concat({'Forecast':monthly_forecast, 'Low':low_forecast, 'High':high_forecast}, names=['Prediction']).droplevel([1],axis=0)
@@ -343,6 +363,21 @@ def master_predict():
     Wrapper metoda ktora spusti cely forecast a ulozi data do databazy
     """
 
+    _DPPO = np.array([
+        1566305.432,
+        1566305.432,
+        1566305.432,
+        14096748.89,
+        0.,
+        0.,
+        0.,
+        0.,
+        0.,
+        0.,
+        0.,
+        0.
+    ])
+
     # get current data
     grouped_ekrk, grouped_ek3 = load_current_sql(['EKRK'], ['EK3'])
 
@@ -370,7 +405,7 @@ def master_predict():
         dpfo_to_predict = dpfo.head(len(dpfo)-1) # if it is too early, dont predict DPFO for the current month
     else:
         dpfo_to_predict = dpfo
-    predictions[0] = dpfo_forecast(dpfo_to_predict, dpfo_trends) # dpfo 
+    predictions[0] = dpfo_forecast(dpfo_to_predict, dpfo_trends, _DPPO) # dpfo 
     predictions[1] = eoy_forecast(dan, dan_trends, w) # local taxes
     predictions[2] = eoy_forecast(nedan, nedan_trends) # non tax revenue
 
